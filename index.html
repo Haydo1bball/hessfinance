@@ -170,7 +170,7 @@ button:active, .chips button:active, .months button:active { transform: scale(.9
 /* tabs + overview views */
 body { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
 .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--card); border-top: 1px solid var(--line);
-  display: grid; grid-template-columns: repeat(6, 1fr);
+  display: grid; grid-template-columns: repeat(5, 1fr);
   padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); }
 .tabbar button { border: 0; background: transparent; color: var(--muted); font: 600 0.72rem var(--f-body); padding: 6px 2px; display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; border-radius: 10px; }
 .tabbar button svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -258,7 +258,16 @@ body.locked .view, body.locked .tabbar { display: none !important; }
 .notif { display: flex; flex-direction: column; gap: 10px; }
 .notif .note { margin: 0; }
 .pill.on { background: var(--good-bg); color: var(--good); }
-.tabbar button { font-size: 0.66rem; }
+.sheet { position: fixed; inset: 0; z-index: 30; background: var(--bg); overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: calc(18px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) calc(28px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  animation: sheetUp .32s var(--ease); }
+@keyframes sheetUp { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.sheet-in { max-width: 480px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.sheet-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.sheet-head .closebtn { font-size: 0.9rem; padding: 8px 14px; color: var(--ink); }
+body.sheet-open { overflow: hidden; }
+.footlinks { display: flex; gap: 14px; }
+.footlinks .linkbtn { color: var(--ink); font-size: 0.82rem; }
 .rep { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); background: none; border-left: 0; border-right: 0; border-bottom: 0; width: 100%; text-align: left; color: var(--ink); font: inherit; cursor: pointer; }
 .rep:first-child { border-top: 0; }
 .rep b { display: block; font-weight: 600; }
@@ -373,19 +382,24 @@ body.locked { padding-bottom: 40px; }
     <p class="note" id="titheNote"></p>
   </div>
 
-  <!-- REPORTS -->
-  <div class="view" id="v-reports" hidden>
+  <!-- REPORTS: full screen card, opened from a notification or the links at the bottom -->
+  <div class="sheet" id="v-reports" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden>
+   <div class="sheet-in">
+    <div class="sheet-head"><h1 id="sheetTitle">Reports</h1><button class="closebtn" id="sheetDone" type="button">Done</button></div>
+    <section class="card report" id="reportOpen" hidden></section>
     <section class="card notif" id="notifCard">
       <div class="head"><h2>Notifications</h2><span class="pill" id="notifPill">Off</span></div>
       <p class="note" id="notifNote">Get your weekly report Sundays at 6pm, a nudge when you haven't logged anything in 3 days, and your year in review on January 1.</p>
       <button class="save" id="notifBtn" type="button">Turn on notifications</button>
       <div class="hint" id="notifHint" role="status" aria-live="polite"></div>
     </section>
-    <section class="card report" id="reportOpen" hidden></section>
-    <section class="card"><div class="head"><h2>Past reports</h2><span class="pill num" id="repCount">0</span></div><div class="list" id="repList"><div class="empty">Your first weekly report arrives Sunday at 6pm.</div></div></section>
+    <section class="card" id="pastCard"><div class="head"><h2>Past reports</h2><span class="pill num" id="repCount">0</span></div><div class="list" id="repList"><div class="empty">Your first weekly report arrives Sunday at 6pm.</div></div></section>
+   </div>
   </div>
 
-  <div class="foot"><span id="syncedAt"></span><button class="linkbtn" id="forget" type="button" hidden>Disconnect this phone</button></div>
+  <div class="foot"><span id="syncedAt"></span>
+    <div class="footlinks" id="footLinks" hidden><button class="linkbtn" id="openNotif" type="button">Notifications</button><button class="linkbtn" id="openPast" type="button">Past reports</button></div>
+    <button class="linkbtn" id="forget" type="button" hidden>Disconnect this phone</button></div>
 </div>
 
 <nav class="tabbar" role="tablist" aria-label="Sections">
@@ -394,7 +408,6 @@ body.locked { padding-bottom: 40px; }
   <button role="tab" data-v="spend" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Spending</button>
   <button role="tab" data-v="income" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>Income</button>
   <button role="tab" data-v="tithe" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M12 2v3M10.5 9L12 5l1.5 4M9 21V12l3-3 3 3v9M4 21v-6l5-3M20 21v-6l-5-3M3 21h18M11 21v-3h2v3"/></svg>Tithing</button>
-  <button role="tab" data-v="reports" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 003.4 0"/></svg>Reports</button>
 </nav>
 
 <script>
@@ -553,11 +566,11 @@ body.locked { padding-bottom: 40px; }
   }
 
   // ---------- tabs
-  const titles = { add: "Hess Finance", budget: "Budget", spend: "Spending", income: "Income", tithe: "Tithing", reports: "Reports" };
+  const titles = { add: "Hess Finance", budget: "Budget", spend: "Spending", income: "Income", tithe: "Tithing" };
   function show(v) {
     view = v;
     document.querySelectorAll(".tabbar button").forEach((b) => b.setAttribute("aria-selected", b.dataset.v === v));
-    ["add", "budget", "spend", "income", "tithe", "reports"].forEach((k) => { $("v-" + k).hidden = k !== v; });
+    ["add", "budget", "spend", "income", "tithe"].forEach((k) => { $("v-" + k).hidden = k !== v; });
     const vv = $("v-" + v); vv.classList.remove("enter"); void vv.offsetWidth; vv.classList.add("enter");
     $("viewTitle").textContent = titles[v];
     try { history.replaceState(null, "", "#" + v); } catch (e) {}
@@ -804,7 +817,23 @@ body.locked { padding-bottom: 40px; }
   }
 
   // ---------- REPORTS view
-  let reports = [], reportsLoaded = false, reportsLoading = false, openId = null;
+  let reports = [], reportsLoaded = false, reportsLoading = false, openId = null, sheetOpen = false;
+  function openSheet(id, focus) {
+    if (!store.ready()) return;
+    if (id) openId = id;
+    sheetOpen = true; $("v-reports").hidden = false; document.body.classList.add("sheet-open");
+    renderReports();
+    const sh = $("v-reports"); sh.scrollTop = 0;
+    if (focus === "past") setTimeout(() => $("pastCard").scrollIntoView({ block: "start" }), 50);
+  }
+  function closeSheet() {
+    sheetOpen = false; openId = null; $("v-reports").hidden = true; document.body.classList.remove("sheet-open");
+    try { history.replaceState(null, "", "#" + view); } catch (e) {}
+  }
+  $("sheetDone").onclick = closeSheet;
+  $("openNotif").onclick = () => openSheet(null, "notif");
+  $("openPast").onclick = () => openSheet(null, "past");
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && sheetOpen) closeSheet(); });
   const repKey = (p) => { const n = p.split("/").pop().replace(".json", ""); const y = n.match(/^year-(\d{4})$/); return y ? (Number(y[1]) + 1) + "-01-01~" : n.replace(/^week-/, ""); };
   async function loadReports() {
     if (!store.ready() || reportsLoading) return;
@@ -818,7 +847,7 @@ body.locked { padding-bottom: 40px; }
       }));
       reports = loaded.filter(Boolean); reportsLoaded = true;
     } catch (e) { /* keep what we have */ }
-    finally { reportsLoading = false; if (view === "reports") renderReports(); }
+    finally { reportsLoading = false; if (sheetOpen) renderReports(); }
   }
   function openReport(id) { openId = id; renderReports(); const o = $("reportOpen"); if (!o.hidden) o.scrollIntoView({ block: "start", behavior: "smooth" }); }
   function renderReportDetail(r) {
@@ -827,7 +856,7 @@ body.locked { padding-bottom: 40px; }
     box.hidden = false;
     const kind = el("div", "kind");
     kind.append(el("div", "eyebrow", r.type === "yearly" ? "Year in review" : fmtDay(r.start) + " to " + fmtDay(r.end)));
-    const close = el("button", "closebtn", "Close"); close.type = "button"; close.onclick = () => { openId = null; try { history.replaceState(null, "", "#reports"); } catch (e) {} renderReports(); };
+    const close = el("button", "closebtn", "Close"); close.type = "button"; close.onclick = () => { openId = null; try { history.replaceState(null, "", "#" + view); } catch (e) {} renderReports(); };
     kind.append(close);
     box.append(kind, el("h2", null, r.title), el("p", "lead", r.body));
     const st = el("div", "stats");
@@ -859,6 +888,7 @@ body.locked { padding-bottom: 40px; }
     }
   }
   function renderReports() {
+    $("sheetTitle").textContent = openId ? "Report" : "Reports";
     renderNotif();
     if (!reportsLoaded) loadReports();
     $("repCount").textContent = reports.length;
@@ -937,13 +967,14 @@ body.locked { padding-bottom: 40px; }
       const sub = await swReg.pushManager.getSubscription();
       pushOn = !!sub && Notification.permission === "granted";
     } catch (e) {}
-    if (view === "reports") renderNotif();
+    if (sheetOpen) renderNotif();
   })();
   if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", (e) => { if (e.data && e.data.open) { try { location.href = e.data.open; } catch (x) {} route(); } });
 
   function renderAll() {
     renderChips();
-    if (view === "add") renderAdd(); else if (view === "budget") renderBudget(); else if (view === "spend") renderSpend(); else if (view === "income") renderIncome(); else if (view === "reports") renderReports(); else renderTithe();
+    if (view === "add") renderAdd(); else if (view === "budget") renderBudget(); else if (view === "spend") renderSpend(); else if (view === "income") renderIncome(); else renderTithe();
+    if (sheetOpen) renderReports();
     const at = (overview && overview.syncedAt) || (config && config.syncedAt);
     $("syncedAt").textContent = at ? "Workbook numbers as of " + new Date(at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
   }
@@ -952,9 +983,14 @@ body.locked { padding-bottom: 40px; }
   function route() {
     const h = (location.hash || "").replace("#", "");
     const [v, id] = h.split("/");
-    if (v === "reports" && id) openId = id;
-    show(["add", "budget", "spend", "income", "tithe", "reports"].includes(v) ? v : "add");
-    if (v === "reports" && id) { try { history.replaceState(null, "", "#reports/" + id); } catch (e) {} }
+    if (v === "reports") {
+      show(view);  // keep the current tab underneath
+      openSheet(id || null, id ? null : "past");
+      if (id) { try { history.replaceState(null, "", "#reports/" + id); } catch (e) {} }
+      return;
+    }
+    if (sheetOpen) closeSheet();
+    show(["add", "budget", "spend", "income", "tithe"].includes(v) ? v : "add");
   }
   route();
   window.addEventListener("hashchange", route);
@@ -962,10 +998,10 @@ body.locked { padding-bottom: 40px; }
   // ---------- connect screen
   function banner(msg) { const b = $("offline"); b.textContent = msg || ""; b.hidden = !msg; }
   function lock(msg) {
-    document.body.classList.add("locked"); $("setup").hidden = false; $("forget").hidden = true;
+    document.body.classList.add("locked"); $("setup").hidden = false; $("forget").hidden = true; $("footLinks").hidden = true; if (sheetOpen) closeSheet();
     const h = $("setupHint"); h.textContent = msg || ""; h.className = "hint" + (msg ? " err" : "");
   }
-  function unlock() { document.body.classList.remove("locked"); $("setup").hidden = true; $("forget").hidden = false; }
+  function unlock() { document.body.classList.remove("locked"); $("setup").hidden = true; $("forget").hidden = false; $("footLinks").hidden = false; }
   $("connect").onclick = async () => {
     const t = $("tokenIn").value.trim();
     const h = $("setupHint");
@@ -995,7 +1031,7 @@ body.locked { padding-bottom: 40px; }
       config = c; overview = o; pending = e;
       if (!titheSaving) tithePaid = (t && t.paid) || {};
       banner(""); renderAll();
-      if (reportsLoaded || view === "reports") loadReports();
+      if (reportsLoaded || sheetOpen) loadReports();
     } catch (err) {
       if (err && err.auth) { store.forget(); lock(err.message); }
       else banner("Can't reach GitHub right now. Showing what was last loaded.");
