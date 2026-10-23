@@ -6,7 +6,7 @@
 <title>Hess Finance</title>
 <meta name="robots" content="noindex,nofollow">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://api.github.com; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://api.github.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -170,7 +170,7 @@ button:active, .chips button:active, .months button:active { transform: scale(.9
 /* tabs + overview views */
 body { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
 .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--card); border-top: 1px solid var(--line);
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(6, 1fr);
   padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); }
 .tabbar button { border: 0; background: transparent; color: var(--muted); font: 600 0.72rem var(--f-body); padding: 6px 2px; display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; border-radius: 10px; }
 .tabbar button svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -253,6 +253,24 @@ body { padding-top: calc(18px + env(safe-area-inset-top, 0px)); }
 .linkbtn { border: 0; background: none; color: var(--muted); font: 500 0.78rem var(--f-body); text-decoration: underline; text-decoration-color: var(--gold); text-underline-offset: 3px; cursor: pointer; padding: 4px; }
 .foot { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 body.locked .view, body.locked .tabbar { display: none !important; }
+
+/* reports + notifications */
+.notif { display: flex; flex-direction: column; gap: 10px; }
+.notif .note { margin: 0; }
+.pill.on { background: var(--good-bg); color: var(--good); }
+.tabbar button { font-size: 0.66rem; }
+.rep { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); background: none; border-left: 0; border-right: 0; border-bottom: 0; width: 100%; text-align: left; color: var(--ink); font: inherit; cursor: pointer; }
+.rep:first-child { border-top: 0; }
+.rep b { display: block; font-weight: 600; }
+.rep small { color: var(--muted); font-size: 0.82rem; line-height: 1.35; display: block; margin-top: 2px; }
+.rep .chev { color: var(--gold); font-size: 1.2rem; }
+.rep[aria-current="true"] b { color: var(--gold); }
+.report { display: flex; flex-direction: column; gap: 14px; }
+.report .lead { font-family: var(--f-display); font-size: 1.15rem; line-height: 1.35; margin: 0; }
+.report .kind { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.report h3 { font-family: var(--f-display); font-weight: 600; font-size: 1rem; margin: 4px 0 0; }
+.report .stats { grid-template-columns: repeat(3, 1fr); }
+.closebtn { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 8px; padding: 5px 10px; font: 500 0.8rem var(--f-body); cursor: pointer; }
 body.locked { padding-bottom: 40px; }
 </style>
 </head>
@@ -355,6 +373,18 @@ body.locked { padding-bottom: 40px; }
     <p class="note" id="titheNote"></p>
   </div>
 
+  <!-- REPORTS -->
+  <div class="view" id="v-reports" hidden>
+    <section class="card notif" id="notifCard">
+      <div class="head"><h2>Notifications</h2><span class="pill" id="notifPill">Off</span></div>
+      <p class="note" id="notifNote">Get your weekly report Sundays at 6pm, a nudge when you haven't logged anything in 3 days, and your year in review on January 1.</p>
+      <button class="save" id="notifBtn" type="button">Turn on notifications</button>
+      <div class="hint" id="notifHint" role="status" aria-live="polite"></div>
+    </section>
+    <section class="card report" id="reportOpen" hidden></section>
+    <section class="card"><div class="head"><h2>Past reports</h2><span class="pill num" id="repCount">0</span></div><div class="list" id="repList"><div class="empty">Your first weekly report arrives Sunday at 6pm.</div></div></section>
+  </div>
+
   <div class="foot"><span id="syncedAt"></span><button class="linkbtn" id="forget" type="button" hidden>Disconnect this phone</button></div>
 </div>
 
@@ -364,6 +394,7 @@ body.locked { padding-bottom: 40px; }
   <button role="tab" data-v="spend" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Spending</button>
   <button role="tab" data-v="income" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>Income</button>
   <button role="tab" data-v="tithe" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M12 2v3M10.5 9L12 5l1.5 4M9 21V12l3-3 3 3v9M4 21v-6l5-3M20 21v-6l-5-3M3 21h18M11 21v-3h2v3"/></svg>Tithing</button>
+  <button role="tab" data-v="reports" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 003.4 0"/></svg>Reports</button>
 </nav>
 
 <script>
@@ -435,6 +466,22 @@ body.locked { padding-bottom: 40px; }
       },
       forget() { token = null; try { localStorage.removeItem(KEY); } catch (e) {} },
       readJSON: readJSON,
+      async listDir(path) {
+        const res = await api("/contents/" + path);
+        if (res.status === 404) return [];
+        if (!res.ok) throw new Error("list " + res.status);
+        return (await res.json()).filter((f) => f.type === "file" && f.name.endsWith(".json")).map((f) => f.path);
+      },
+      async deleteFile(path) {
+        const cur = await readFile(path);
+        if (!cur) return;
+        const res = await api("/contents/" + path, { method: "DELETE", body: { message: "Turn off notifications for a phone", sha: cur.sha } });
+        if (!res.ok && res.status !== 404) throw new Error("delete " + res.status);
+      },
+      async writeJSON(path, obj, message) {
+        const cur = await readFile(path);
+        return writeFile(path, JSON.stringify(obj, null, 1) + "\n", cur && cur.sha, message);
+      },
       async listEntries() {
         const res = await api("/contents/entries");
         if (res.status === 404) return [];
@@ -506,11 +553,11 @@ body.locked { padding-bottom: 40px; }
   }
 
   // ---------- tabs
-  const titles = { add: "Hess Finance", budget: "Budget", spend: "Spending", income: "Income", tithe: "Tithing" };
+  const titles = { add: "Hess Finance", budget: "Budget", spend: "Spending", income: "Income", tithe: "Tithing", reports: "Reports" };
   function show(v) {
     view = v;
     document.querySelectorAll(".tabbar button").forEach((b) => b.setAttribute("aria-selected", b.dataset.v === v));
-    ["add", "budget", "spend", "income", "tithe"].forEach((k) => { $("v-" + k).hidden = k !== v; });
+    ["add", "budget", "spend", "income", "tithe", "reports"].forEach((k) => { $("v-" + k).hidden = k !== v; });
     const vv = $("v-" + v); vv.classList.remove("enter"); void vv.offsetWidth; vv.classList.add("enter");
     $("viewTitle").textContent = titles[v];
     try { history.replaceState(null, "", "#" + v); } catch (e) {}
@@ -756,15 +803,161 @@ body.locked { padding-bottom: 40px; }
     $("titheNote").textContent = "Tap the box once you pay a month. Counts " + (counted.length ? counted.join(", ") : "your paychecks") + ". Leaves out " + Array.from(skip).join(", ") + ".";
   }
 
+  // ---------- REPORTS view
+  let reports = [], reportsLoaded = false, reportsLoading = false, openId = null;
+  const repKey = (p) => { const n = p.split("/").pop().replace(".json", ""); const y = n.match(/^year-(\d{4})$/); return y ? (Number(y[1]) + 1) + "-01-01~" : n.replace(/^week-/, ""); };
+  async function loadReports() {
+    if (!store.ready() || reportsLoading) return;
+    reportsLoading = true;
+    try {
+      const paths = (await store.listDir("data/reports")).sort((a, b) => repKey(b).localeCompare(repKey(a))).slice(0, 26);
+      const have = new Map(reports.map((r) => [r.id, r]));
+      const loaded = await Promise.all(paths.map(async (p) => {
+        const id = p.split("/").pop().replace(".json", "");
+        return have.get(id) || (await store.readJSON(p));
+      }));
+      reports = loaded.filter(Boolean); reportsLoaded = true;
+    } catch (e) { /* keep what we have */ }
+    finally { reportsLoading = false; if (view === "reports") renderReports(); }
+  }
+  function openReport(id) { openId = id; renderReports(); const o = $("reportOpen"); if (!o.hidden) o.scrollIntoView({ block: "start", behavior: "smooth" }); }
+  function renderReportDetail(r) {
+    const box = $("reportOpen"); box.textContent = "";
+    if (!r) { box.hidden = true; return; }
+    box.hidden = false;
+    const kind = el("div", "kind");
+    kind.append(el("div", "eyebrow", r.type === "yearly" ? "Year in review" : fmtDay(r.start) + " to " + fmtDay(r.end)));
+    const close = el("button", "closebtn", "Close"); close.type = "button"; close.onclick = () => { openId = null; try { history.replaceState(null, "", "#reports"); } catch (e) {} renderReports(); };
+    kind.append(close);
+    box.append(kind, el("h2", null, r.title), el("p", "lead", r.body));
+    const st = el("div", "stats");
+    if (r.type === "yearly") {
+      stat(st, "Earned", money0(r.earned), "pos"); stat(st, "Spent", money0(r.spent)); stat(st, r.net >= 0 ? "Saved" : "Short", money0(Math.abs(r.net)), r.net >= 0 ? "pos" : "neg");
+      box.appendChild(st);
+      box.appendChild(el("h3", null, "Month by month"));
+      const cols = el("div", "vs"); const max = Math.max(1, ...r.months.map((m) => Math.max(m.earned, m.spent)));
+      r.months.forEach((m) => {
+        const g = el("div", "g"); const pair = el("div", "pair"); const a = el("i", "in"), b = el("i", "out");
+        a.style.height = (Math.max(0, m.earned) / max * 100) + "%"; b.style.height = (Math.max(0, m.spent) / max * 100) + "%";
+        g.title = MONTHS[m.m - 1] + " earned " + money0(m.earned) + ", spent " + money0(m.spent);
+        pair.append(a, b); g.append(pair, el("span", null, SHORT[m.m - 1][0])); cols.appendChild(g);
+      });
+      const lg = el("div", "legend"); lg.innerHTML = '<span><i class="lg-in"></i>Income</span><span><i class="lg-out"></i>Spending</span>';
+      box.append(lg, cols);
+      box.appendChild(el("h3", null, "Where it went")); const cats = el("div"); box.appendChild(cats); hbars(cats, Object.fromEntries(Object.entries(r.byCategory).filter(([, v]) => v > 0)));
+      box.appendChild(el("h3", null, "Where it came from")); const src = el("div"); box.appendChild(src); hbars(src, r.incomeBySource, "var(--good)");
+      box.appendChild(el("p", "note", "Tithing marked paid for " + r.tithingMonthsPaid + " of 12 months."));
+    } else {
+      if (r.earned > 0) stat(st, "Earned", money0(r.earned), "pos");
+      stat(st, "Spent", money0(r.spent));
+      stat(st, "Most on", r.top ? r.top.c : "Nothing");
+      if (r.earned <= 0) stat(st, "Purchases", String((r.expenses || []).length));
+      box.appendChild(st);
+      box.appendChild(el("h3", null, "By category")); const cats = el("div"); box.appendChild(cats); hbars(cats, Object.fromEntries(Object.entries(r.byCategory || {}).filter(([, v]) => v > 0)));
+      box.appendChild(el("h3", null, "Every expense")); const ex = el("div", "list"); box.appendChild(ex); txList(ex, r.expenses || [], false);
+      if ((r.income || []).length) { box.appendChild(el("h3", null, "Income")); const inc = el("div", "list"); box.appendChild(inc); txList(inc, r.income, true); }
+    }
+  }
+  function renderReports() {
+    renderNotif();
+    if (!reportsLoaded) loadReports();
+    $("repCount").textContent = reports.length;
+    const list = $("repList"); list.textContent = "";
+    if (!reports.length) list.appendChild(el("div", "empty", reportsLoaded ? "Your first weekly report arrives Sunday at 6pm." : "Loading reports…"));
+    reports.forEach((r) => {
+      const b = el("button", "rep"); b.type = "button"; b.setAttribute("aria-current", r.id === openId);
+      const t = el("div"); t.append(el("b", null, r.title), el("small", null, r.body));
+      b.append(t, el("span", "chev", "›")); b.onclick = () => { try { history.replaceState(null, "", "#reports/" + r.id); } catch (e) {} openReport(r.id); };
+      list.appendChild(b);
+    });
+    const open = reports.find((r) => r.id === openId);
+    if (openId && !open && reportsLoaded) { const p = "data/reports/" + openId + ".json"; store.readJSON(p).then((r) => { if (r) { reports = [r].concat(reports.filter((x) => x.id !== r.id)); renderReports(); } }).catch(() => {}); }
+    renderReportDetail(open || null);
+  }
+
+  // ---------- notifications (Web Push to this phone)
+  const VAPID_PUBLIC = "BO20NOCW4qewbNC4zyZTKnfxDb5Zts6c5gOLtz5JqyqWwaH3Qy6AljddDvvGvYQD4nD9pxxlq8cASBu_9sJcEG8";
+  const DEVICE_KEY = "hessfinance.device";
+  let swReg = null, pushOn = false;
+  const standalone = () => window.navigator.standalone === true || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+  const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  function deviceId() {
+    let id = null; try { id = localStorage.getItem(DEVICE_KEY); } catch (e) {}
+    if (!id) { id = "phone-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); try { localStorage.setItem(DEVICE_KEY, id); } catch (e) {} }
+    return id;
+  }
+  function b64ToBytes(s) { const p = "=".repeat((4 - s.length % 4) % 4); const raw = atob((s + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(raw, (c) => c.charCodeAt(0)); }
+  function renderNotif() {
+    const btn = $("notifBtn"), pill = $("notifPill"), note = $("notifNote");
+    pill.textContent = pushOn ? "On" : "Off"; pill.classList.toggle("on", pushOn);
+    if (!pushSupported() || !standalone()) {
+      btn.hidden = true;
+      note.textContent = "Open Hess Finance from your home screen icon to turn on notifications.";
+      return;
+    }
+    if (Notification.permission === "denied") {
+      btn.hidden = true;
+      note.textContent = "Notifications are blocked. Turn them on in iPhone Settings, Notifications, Hess Finance, then come back here.";
+      return;
+    }
+    btn.hidden = false;
+    btn.textContent = pushOn ? "Turn off notifications" : "Turn on notifications";
+    btn.classList.toggle("done", false);
+    note.textContent = pushOn
+      ? "You'll get your weekly report Sundays at 6pm, a nudge after 3 days without logging, and your year in review on January 1."
+      : "Get your weekly report Sundays at 6pm, a nudge when you haven't logged anything in 3 days, and your year in review on January 1.";
+  }
+  function notifHint(msg, cls) { const h = $("notifHint"); h.textContent = msg || ""; h.className = "hint" + (cls ? " " + cls : ""); }
+  $("notifBtn").onclick = async () => {
+    const btn = $("notifBtn"); btn.disabled = true; notifHint("");
+    try {
+      if (pushOn) {
+        const sub = swReg && await swReg.pushManager.getSubscription();
+        if (sub) await sub.unsubscribe();
+        await store.deleteFile("data/push/" + deviceId() + ".json");
+        pushOn = false; notifHint("Notifications are off for this phone.");
+      } else {
+        const perm = await Notification.requestPermission();  // must be first, straight from the tap
+        if (perm !== "granted") { notifHint(perm === "denied" ? "Notifications were blocked. You can allow them in iPhone Settings." : "No problem, you can turn them on anytime."); return; }
+        swReg = swReg || await navigator.serviceWorker.register("sw.js");
+        await navigator.serviceWorker.ready;
+        const sub = (await swReg.pushManager.getSubscription()) || await swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID_PUBLIC) });
+        const j = sub.toJSON();
+        await store.writeJSON("data/push/" + deviceId() + ".json", { endpoint: j.endpoint, keys: j.keys, createdAt: new Date().toISOString() }, "Turn on notifications for a phone");
+        pushOn = true; notifHint("You're all set. Your first report comes Sunday at 6pm.", "ok");
+      }
+    } catch (e) {
+      notifHint(e && e.auth ? e.message : "Couldn't change notifications. Check your connection and try again.", "err");
+    } finally { btn.disabled = false; renderNotif(); }
+  };
+  (async () => {
+    if (!pushSupported()) return;
+    try {
+      swReg = await navigator.serviceWorker.register("sw.js");
+      const sub = await swReg.pushManager.getSubscription();
+      pushOn = !!sub && Notification.permission === "granted";
+    } catch (e) {}
+    if (view === "reports") renderNotif();
+  })();
+  if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", (e) => { if (e.data && e.data.open) { try { location.href = e.data.open; } catch (x) {} route(); } });
+
   function renderAll() {
     renderChips();
-    if (view === "add") renderAdd(); else if (view === "budget") renderBudget(); else if (view === "spend") renderSpend(); else if (view === "income") renderIncome(); else renderTithe();
+    if (view === "add") renderAdd(); else if (view === "budget") renderBudget(); else if (view === "spend") renderSpend(); else if (view === "income") renderIncome(); else if (view === "reports") renderReports(); else renderTithe();
     const at = (overview && overview.syncedAt) || (config && config.syncedAt);
     $("syncedAt").textContent = at ? "Workbook numbers as of " + new Date(at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
   }
 
-  const startHash = (location.hash || "").replace("#", "");
-  show(["add", "budget", "spend", "income", "tithe"].includes(startHash) ? startHash : "add");
+  // #add, #budget, ... and #reports/<id> (from a notification tap)
+  function route() {
+    const h = (location.hash || "").replace("#", "");
+    const [v, id] = h.split("/");
+    if (v === "reports" && id) openId = id;
+    show(["add", "budget", "spend", "income", "tithe", "reports"].includes(v) ? v : "add");
+    if (v === "reports" && id) { try { history.replaceState(null, "", "#reports/" + id); } catch (e) {} }
+  }
+  route();
+  window.addEventListener("hashchange", route);
 
   // ---------- connect screen
   function banner(msg) { const b = $("offline"); b.textContent = msg || ""; b.hidden = !msg; }
@@ -787,7 +980,7 @@ body.locked { padding-bottom: 40px; }
   };
   $("forget").onclick = () => {
     if ($("forget").dataset.sure !== "1") { $("forget").dataset.sure = "1"; $("forget").textContent = "Tap again to remove the key from this phone"; return; }
-    store.forget(); config = overview = null; pending = []; tithePaid = {};
+    store.forget(); config = overview = null; pending = []; tithePaid = {}; reports = []; reportsLoaded = false; openId = null;
     $("forget").dataset.sure = ""; $("forget").textContent = "Disconnect this phone";
     lock(); renderAll();
   };
@@ -802,6 +995,7 @@ body.locked { padding-bottom: 40px; }
       config = c; overview = o; pending = e;
       if (!titheSaving) tithePaid = (t && t.paid) || {};
       banner(""); renderAll();
+      if (reportsLoaded || view === "reports") loadReports();
     } catch (err) {
       if (err && err.auth) { store.forget(); lock(err.message); }
       else banner("Can't reach GitHub right now. Showing what was last loaded.");
