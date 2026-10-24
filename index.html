@@ -900,9 +900,8 @@ body.locked { padding-bottom: 40px; }
     const ch = sh.n * (now.p - then.p); return { ch, pct: then.p ? (now.p - then.p) / then.p * 100 : 0, since: then.d };
   }
   function rothDividends(r) {
-    const y = String(new Date().getFullYear()), sh = r.shares || []; let total = 0, any = false;
+    const sh = r.shares || []; let total = Number(r.dividendsBefore) || 0, any = r.dividendsBefore != null;
     for (let i = 1; i < sh.length; i++) {
-      if (!sh[i].d.startsWith(y)) continue;
       const p = priceAt(sh[i].d); if (!p) continue; any = true;
       const put = (r.contributions || []).filter((c) => !c.ytd && c.d === sh[i].d).reduce((a, c) => a + Number(c.a), 0);
       const extra = (sh[i].n - sh[i - 1].n) * p - put;
@@ -910,6 +909,15 @@ body.locked { padding-bottom: 40px; }
     }
     return any ? Math.round(total * 100) / 100 : null;
   }
+  function hysaTotals(sv) {
+    // total interest = latest balance minus the money put in (starting point plus later deposits)
+    const h = sv.hysa || {}, b = h.baseline, last = lastOf(h.balances);
+    if (!b || !last) return null;
+    const dep = (h.deposits || []).filter((x) => x.d >= b.d && x.t !== "base").reduce((a, x) => a + Number(x.a), 0);
+    const putIn = b.balance - b.interest + dep;
+    return { interest: Math.round((last.v - putIn) * 100) / 100, putIn: Math.round(putIn * 100) / 100 };
+  }
+  function rothPutIn(r) { return (r.contributions || []).reduce((a, c) => a + Number(c.a), 0); }
   function numIn3(id) { const v = parseFloat(String($(id).value || "").replace(/[,\s]/g, "")); return isNaN(v) ? null : Math.round(v * 1000) / 1000; }
   function numIn(id) { const v = parseFloat(String($(id).value || "").replace(/[$,\s%]/g, "")); return isNaN(v) ? null : Math.round(v * 100) / 100; }
   function saveHint(msg, cls) { const h = $("saveHint"); if (h) { h.textContent = msg || ""; h.className = "hint" + (cls ? " " + cls : ""); } }
@@ -936,10 +944,13 @@ body.locked { padding-bottom: 40px; }
       f.appendChild(el("h2", null, setup ? "Add your balances" : "Update savings balance"));
       f.appendChild(el("p", "note", setup ? "Type what your bank and Vanguard apps show right now. Your Roth updates itself from the VTSAX price after this." : "Type what your bank app shows right now."));
       const r2 = el("div", "row2"); r2.append(field("High yield savings", "inH", "0.00"), setup ? field("Savings APY %", "inA", "4.00") : el("span")); f.appendChild(r2);
-      if (setup) { const r3 = el("div", "row2"); r3.append(field("VTSAX shares", "inS", "0.000"), field("Put in Roth so far this year", "inC", "Optional")); f.appendChild(r3); }
+      if (setup) {
+        const r3 = el("div", "row2"); r3.append(field("Interest earned so far", "inX", "0.00"), field("VTSAX shares", "inS", "0.000")); f.appendChild(r3);
+        const r4 = el("div", "row2"); r4.append(field("Total put in Roth", "inC", "0.00"), field("Roth dividends so far", "inV", "Optional")); f.appendChild(r4);
+      }
       const go = el("button", "save", setup ? "Save balances" : "Save balance"); go.id = "saveGo"; go.type = "button";
       go.onclick = () => {
-        const hv = numIn("inH"), apy = setup ? numIn("inA") : null, sh = setup ? numIn3("inS") : null, c = setup ? numIn("inC") : null;
+        const hv = numIn("inH"), apy = setup ? numIn("inA") : null, sh = setup ? numIn3("inS") : null, c = setup ? numIn("inC") : null, ix = setup ? numIn("inX") : null, dvb = setup ? numIn("inV") : null;
         if (hv == null && sh == null) { saveHint(setup ? "Type at least one balance." : "Type your savings balance.", "err"); return; }
         if (setup && apy == null) { saveHint("Add your savings APY, like 4.00.", "err"); return; }
         const d = todayISO();
@@ -949,6 +960,8 @@ body.locked { padding-bottom: 40px; }
           if (sh != null) cur.roth.shares = put(cur.roth.shares, sh, "n");
           if (apy != null) cur.hysa.apy = apy;
           if (c) cur.roth.contributions = (cur.roth.contributions || []).concat([{ d, a: c, ytd: true }]);
+          if (setup && hv != null) cur.hysa.baseline = { d, balance: hv, interest: ix || 0 };
+          if (setup && dvb != null) cur.roth.dividendsBefore = dvb;
           cur.updatedAt = new Date().toISOString();
           return cur;
         }, "Update savings balances"), null, setup ? "Saved. Your Roth now follows the VTSAX price." : "Saved. See you next week.");
@@ -987,6 +1000,27 @@ body.locked { padding-bottom: 40px; }
       const r2 = el("div", "row2"); r2.append(l, field("Interest paid", "inI", "0.00")); f.appendChild(r2);
       const go = el("button", "save", "Save interest"); go.id = "saveGo"; go.type = "button";
       go.onclick = () => { const a = numIn("inI"), mk = $("inM").value; if (a == null || a < 0) { saveHint("Type the interest amount.", "err"); return; } done(() => saveSavings((cur) => { cur.hysa.interest = Object.assign({}, cur.hysa.interest || {}, { [mk]: a }); return cur; }, "Record savings interest"), null, "Interest saved."); };
+      f.append(go);
+    } else if (saveMode === "deposit") {
+      f.appendChild(el("h2", null, "Deposit or withdrawal"));
+      f.appendChild(el("p", "note", "Record money you move in or out so it isn't counted as interest. Your balance is adjusted by the same amount until your next update."));
+      const l = el("label", "f"); l.append("Type"); const sel = el("select"); sel.id = "inT";
+      [["in", "Deposit"], ["out", "Withdrawal"]].forEach(([v, t]) => { const o = el("option", null, t); o.value = v; sel.appendChild(o); });
+      l.appendChild(sel);
+      const r2 = el("div", "row2"); r2.append(l, field("Amount", "inD", "0.00")); f.appendChild(r2);
+      const go = el("button", "save", "Save"); go.id = "saveGo"; go.type = "button";
+      go.onclick = () => {
+        const a = numIn("inD"), out = $("inT").value === "out";
+        if (!a || a <= 0) { saveHint("Type an amount above zero.", "err"); return; }
+        const amt = out ? -a : a, d = todayISO();
+        done(() => saveSavings((cur) => {
+          cur.hysa.deposits = (cur.hysa.deposits || []).concat([{ d, a: amt }]);
+          const last = lastOf(cur.hysa.balances);
+          if (last && last.d >= d) last.v = Math.round((last.v + amt) * 100) / 100;
+          else if (last) cur.hysa.balances = cur.hysa.balances.concat([{ d, v: Math.round((last.v + amt) * 100) / 100 }]);
+          return cur;
+        }, out ? "Record savings withdrawal" : "Record savings deposit"), null, out ? "Withdrawal saved." : "Deposit saved.");
+      };
       f.append(go);
     } else if (saveMode === "contrib") {
       f.appendChild(el("h2", null, "Add Roth contribution"));
@@ -1043,9 +1077,10 @@ body.locked { padding-bottom: 40px; }
     c1.append(el("div", "eyebrow", h.name || "High yield savings"), el("div", "bal", hb ? money(hb.v) : "$0.00"));
     const s1 = el("div", "sub"); s1.append(el("span", null, hb ? "Updated " + fmtDay(hb.d) : "Not added yet")); const ap = el("span"); ap.append("APY ", el("b", null, (Number(h.apy) || 0).toFixed(2) + "%")); s1.appendChild(ap); c1.appendChild(s1);
     const rowI = el("div", "row"); const li = el("span", null, MONTHS[new Date().getMonth()] + " interest"); if (est.estimated) li.appendChild(el("span", "est", "estimated")); rowI.append(li, el("span", "pos", money(est.month))); c1.appendChild(rowI);
-    const rowY = el("div", "row"); rowY.append(el("span", null, "Interest this year"), el("span", "pos", money(hysaYear(sv, est)))); c1.appendChild(rowY);
+    const tot = hysaTotals(sv), rowY = el("div", "row");
+    rowY.append(el("span", null, "Total interest earned"), el("span", tot ? "pos" : null, tot ? money(tot.interest) : "Not set yet")); c1.appendChild(rowY);
     const b1 = el("div", "btns");
-    const bi = el("button", "ghost", "Interest posted"); bi.type = "button"; bi.onclick = () => { saveMode = "interest"; renderSave(); window.scrollTo(0, 0); };
+    const bi = el("button", "ghost", "Deposit or withdrawal"); bi.type = "button"; bi.onclick = () => { saveMode = "deposit"; renderSave(); window.scrollTo(0, 0); };
     const ba = el("button", "ghost", "Change APY"); ba.type = "button"; ba.onclick = () => { saveMode = "apy"; renderSave(); window.scrollTo(0, 0); };
     b1.append(bi, ba); c1.appendChild(b1);
 
@@ -1062,12 +1097,14 @@ body.locked { padding-bottom: 40px; }
     } else if (!v) {
       c2.appendChild(el("p", "note", "Waiting for the first VTSAX price. It's checked every weekday evening."));
     }
+    const putAll = rothPutIn(r), rowG = el("div", "row");
+    if (rn && putAll > 0) { const g = rn.v - putAll, gp = g / putAll * 100; rowG.append(el("span", null, "Total gain"), el("span", g >= 0 ? "pos" : "neg", (g >= 0 ? "+" : "−") + money(Math.abs(g)) + " (" + (gp >= 0 ? "+" : "−") + Math.abs(gp).toFixed(1) + "%)")); c2.appendChild(rowG); }
     const wk = rothWeek(r), rowW = el("div", "row");
     if (wk) rowW.append(el("span", null, "Past week"), el("span", wk.ch >= 0 ? "pos" : "neg", (wk.ch >= 0 ? "+" : "−") + money(Math.abs(wk.ch)) + " (" + (wk.pct >= 0 ? "+" : "−") + Math.abs(wk.pct).toFixed(1) + "%)"));
     else rowW.append(el("span", null, "Past week"), el("span", null, (r.shares || []).length ? "After a week of prices" : "After you add shares"));
     c2.appendChild(rowW);
     const dv = rothDividends(r), rowD = el("div", "row");
-    rowD.append(el("span", null, "Dividends reinvested this year"), el("span", dv ? "pos" : null, dv == null ? "After your next share update" : money(dv)));
+    rowD.append(el("span", null, "Dividends earned"), el("span", dv ? "pos" : null, dv == null ? "After your next share update" : money(dv)));
     c2.appendChild(rowD);
     const yr = new Date().getFullYear(), lim = IRA_LIMITS[yr], put = rothYear(sv);
     const rowP = el("div", "row"); rowP.append(el("span", null, "Put in this year"), el("span", null, money0(put) + (lim ? " of " + money0(lim) : ""))); c2.appendChild(rowP);
@@ -1084,7 +1121,7 @@ body.locked { padding-bottom: 40px; }
     if (svg) { c3.appendChild(svg); const lg = el("div", "legend"); lg.innerHTML = '<span><i class="lg-h"></i>Savings</span><span><i class="lg-r"></i>Roth IRA</span>'; c3.appendChild(lg); }
     else c3.appendChild(el("div", "empty", "Your chart fills in as prices and balances come in."));
 
-    note.textContent = "Savings interest is estimated daily from your balance and APY until you enter what was paid. Your Roth value is your VTSAX shares times the latest closing price from Nasdaq. Balances stay in your private repo and never appear in notifications.";
+    note.textContent = "This month\u2019s interest is estimated daily from your balance and APY. Total interest is your balance minus what you\u2019ve deposited. Your Roth value is your VTSAX shares times the latest closing price from Nasdaq. Balances stay in your private repo and never appear in notifications.";
   }
 
   // ---------- REPORTS view
