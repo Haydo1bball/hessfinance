@@ -170,7 +170,7 @@ button:active, .chips button:active, .months button:active { transform: scale(.9
 /* tabs + overview views */
 body { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
 .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--card); border-top: 1px solid var(--line);
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(6, 1fr);
   padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); }
 .tabbar button { border: 0; background: transparent; color: var(--muted); font: 600 0.72rem var(--f-body); padding: 6px 2px; display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; border-radius: 10px; }
 .tabbar button svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -242,6 +242,26 @@ mark { background: var(--gold-soft); color: inherit; border-radius: 3px; padding
 .cols span { font-size: 0.62rem; color: var(--muted); }
 .note { font-size: 0.82rem; color: var(--muted); line-height: 1.45; }
 .tag { font-size: 0.68rem; font-weight: 600; color: var(--warn); margin-left: 6px; }
+.tabbar button { font-size: 0.66rem; }
+
+/* savings */
+.acct { display: flex; flex-direction: column; gap: 12px; }
+.acct .bal { font-family: var(--f-num); font-size: 1.9rem; font-weight: 600; letter-spacing: -0.02em; }
+.acct .sub { display: flex; justify-content: space-between; gap: 10px; font-size: 0.85rem; color: var(--muted); flex-wrap: wrap; }
+.acct .sub b { color: var(--ink); font-family: var(--f-num); font-weight: 600; }
+.acct .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 0.92rem; }
+.acct .row:first-of-type { border-top: 0; }
+.acct .row span:last-child { font-family: var(--f-num); font-weight: 600; }
+.acct .row .est { font-size: 0.72rem; color: var(--muted); font-family: var(--f-body); font-weight: 500; margin-left: 6px; }
+.acct .pos { color: var(--good); } .acct .neg { color: var(--bad); }
+.acct .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.ghost { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 10px; padding: 9px 13px; font: 600 0.85rem var(--f-body); cursor: pointer; }
+.saveform { display: flex; flex-direction: column; gap: 12px; }
+.saveform .row2 { grid-template-columns: 1fr 1fr; }
+.saveform select { font: 400 1rem var(--f-body); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; width: 100%; }
+.chart svg { width: 100%; height: 150px; display: block; }
+.chart .legend { margin-top: 6px; }
+.lg-h { background: var(--gold); } .lg-r { background: var(--navy); }
 
 /* home screen app: clear the status bar */
 body { padding-top: calc(18px + env(safe-area-inset-top, 0px)); }
@@ -382,6 +402,14 @@ body.locked { padding-bottom: 40px; }
     <p class="note" id="titheNote"></p>
   </div>
 
+  <!-- SAVINGS -->
+  <div class="view" id="v-save" hidden>
+    <div class="stats" id="saveStats"></div>
+    <section class="card saveform" id="saveForm" hidden></section>
+    <div id="saveCards"></div>
+    <p class="note" id="saveNote"></p>
+  </div>
+
   <!-- REPORTS: full screen card, opened from a notification or the links at the bottom -->
   <div class="sheet" id="v-reports" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden>
    <div class="sheet-in">
@@ -408,6 +436,7 @@ body.locked { padding-bottom: 40px; }
   <button role="tab" data-v="spend" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Spending</button>
   <button role="tab" data-v="income" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>Income</button>
   <button role="tab" data-v="tithe" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M12 2v3M10.5 9L12 5l1.5 4M9 21V12l3-3 3 3v9M4 21v-6l5-3M20 21v-6l-5-3M3 21h18M11 21v-3h2v3"/></svg>Tithing</button>
+  <button role="tab" data-v="save" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>Savings</button>
 </nav>
 
 <script>
@@ -491,6 +520,15 @@ body.locked { padding-bottom: 40px; }
         const res = await api("/contents/" + path, { method: "DELETE", body: { message: "Turn off notifications for a phone", sha: cur.sha } });
         if (!res.ok && res.status !== 404) throw new Error("delete " + res.status);
       },
+      async updateJSON(path, change, message) {
+        // read the latest copy, apply a change, save; retry once if it changed underneath us
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const f = await readFile(path);
+          const next = change(f ? JSON.parse(f.text) : null);
+          try { await writeFile(path, JSON.stringify(next, null, 1) + "\n", f && f.sha, message); return next; }
+          catch (e) { if (attempt === 0 && (e.status === 409 || e.status === 422)) continue; throw e; }
+        }
+      },
       async writeJSON(path, obj, message) {
         const cur = await readFile(path);
         return writeFile(path, JSON.stringify(obj, null, 1) + "\n", cur && cur.sha, message);
@@ -566,11 +604,11 @@ body.locked { padding-bottom: 40px; }
   }
 
   // ---------- tabs
-  const titles = { add: "Hess Finance", budget: "Budget", spend: "Spending", income: "Income", tithe: "Tithing" };
+  const titles = { add: "Hess Finance", budget: "Budget", spend: "Spending", income: "Income", tithe: "Tithing", save: "Savings" };
   function show(v) {
     view = v;
     document.querySelectorAll(".tabbar button").forEach((b) => b.setAttribute("aria-selected", b.dataset.v === v));
-    ["add", "budget", "spend", "income", "tithe"].forEach((k) => { $("v-" + k).hidden = k !== v; });
+    ["add", "budget", "spend", "income", "tithe", "save"].forEach((k) => { $("v-" + k).hidden = k !== v; });
     const vv = $("v-" + v); vv.classList.remove("enter"); void vv.offsetWidth; vv.classList.add("enter");
     $("viewTitle").textContent = titles[v];
     try { history.replaceState(null, "", "#" + v); } catch (e) {}
@@ -816,6 +854,177 @@ body.locked { padding-bottom: 40px; }
     $("titheNote").textContent = "Tap the box once you pay a month. Counts " + (counted.length ? counted.join(", ") : "your paychecks") + ". Leaves out " + Array.from(skip).join(", ") + ".";
   }
 
+  // ---------- SAVINGS view (balances typed in by Hayden, stored in data/savings.json)
+  let savings = null, savingsLoaded = false, savingSaving = false, saveMode = null;
+  const IRA_LIMITS = { 2026: 7500 };
+  const lastOf = (arr) => (arr && arr.length ? arr[arr.length - 1] : null);
+  const todayISO = () => today();
+  function hysaEstimate(sv) {
+    const h = sv.hysa || {}, last = lastOf(h.balances), apy = Number(h.apy) || 0;
+    const now = new Date(), mk = now.getFullYear() + "-" + pad(now.getMonth() + 1);
+    const posted = (h.interest || {})[mk];
+    if (posted != null) return { month: posted, estimated: false, mk };
+    const days = now.getDate();
+    return { month: last ? Math.round(last.v * apy / 100 / 365 * days * 100) / 100 : 0, estimated: true, mk };
+  }
+  function hysaYear(sv, est) {
+    const y = String(new Date().getFullYear());
+    const posted = Object.entries((sv.hysa || {}).interest || {}).filter(([k]) => k.startsWith(y)).reduce((a, [, v]) => a + Number(v), 0);
+    return Math.round((posted + (est.estimated ? est.month : 0)) * 100) / 100;
+  }
+  function rothYear(sv) {
+    const y = String(new Date().getFullYear());
+    return ((sv.roth || {}).contributions || []).filter((c) => c.d.startsWith(y)).reduce((a, c) => a + Number(c.a), 0);
+  }
+  function numIn(id) { const v = parseFloat(String($(id).value || "").replace(/[$,\s%]/g, "")); return isNaN(v) ? null : Math.round(v * 100) / 100; }
+  function saveHint(msg, cls) { const h = $("saveHint"); if (h) { h.textContent = msg || ""; h.className = "hint" + (cls ? " " + cls : ""); } }
+  async function saveSavings(change, message) {
+    savingSaving = true;
+    try { savings = await store.updateJSON("data/savings.json", (cur) => change(cur || { hysa: { name: "High yield savings", apy: 0, balances: [], interest: {} }, roth: { name: "Vanguard Roth IRA", values: [], contributions: [] } }), message); saveMode = null; }
+    finally { savingSaving = false; }
+  }
+  function field(label, id, ph, val) { const l = el("label", "f"); l.append(label); const i = el("input"); i.id = id; i.inputMode = "decimal"; i.autocomplete = "off"; i.placeholder = ph; if (val != null) i.value = val; l.appendChild(i); return l; }
+  function renderSaveForm() {
+    const f = $("saveForm"); f.textContent = "";
+    if (!saveMode) { f.hidden = true; return; }
+    f.hidden = false;
+    const sv = savings || {}, h = sv.hysa || {}, r = sv.roth || {};
+    const done = async (fn, msg, okMsg) => {
+      const b = $("saveGo"); b.disabled = true; saveHint("Saving…");
+      try { await fn(); renderSave(); saveHint(okMsg, "ok"); }
+      catch (e) { saveHint(e && e.auth ? e.message : (e && e.mine) ? e.message : "Couldn't save. Check your connection and try again.", "err"); }
+      finally { const b2 = $("saveGo"); if (b2) b2.disabled = false; }
+    };
+    const mine = (m) => { const e = new Error(m); e.mine = true; return e; };
+    if (saveMode === "setup" || saveMode === "update") {
+      f.appendChild(el("h2", null, saveMode === "setup" ? "Add your balances" : "Update balances"));
+      f.appendChild(el("p", "note", "Type what your bank and Vanguard apps show right now."));
+      const r2 = el("div", "row2"); r2.append(field("High yield savings", "inH", "0.00"), field("Vanguard Roth IRA", "inR", "0.00")); f.appendChild(r2);
+      const r3 = el("div", "row2");
+      r3.append(field(saveMode === "setup" ? "Savings APY %" : "Added to Roth since last time", saveMode === "setup" ? "inA" : "inC", saveMode === "setup" ? "4.00" : "Optional", saveMode === "setup" ? null : null));
+      if (saveMode === "setup") r3.append(field("Put in Roth so far this year", "inC", "Optional"));
+      f.appendChild(r3);
+      const go = el("button", "save", "Save balances"); go.id = "saveGo"; go.type = "button";
+      go.onclick = () => {
+        const hv = numIn("inH"), rv = numIn("inR"), apy = saveMode === "setup" ? numIn("inA") : null, c = numIn("inC");
+        if (hv == null && rv == null) { saveHint("Type at least one balance.", "err"); return; }
+        if (saveMode === "setup" && apy == null) { saveHint("Add your savings APY, like 4.00.", "err"); return; }
+        const d = todayISO();
+        done(() => saveSavings((cur) => {
+          const put = (arr, v) => { if (v == null) return arr || []; const list = (arr || []).filter((x) => x.d !== d); list.push({ d, v }); return list.sort((a, b) => a.d.localeCompare(b.d)); };
+          cur.hysa.balances = put(cur.hysa.balances, hv);
+          cur.roth.values = put(cur.roth.values, rv);
+          if (apy != null) cur.hysa.apy = apy;
+          if (c) cur.roth.contributions = (cur.roth.contributions || []).concat([saveMode === "setup" ? { d, a: c, ytd: true } : { d, a: c }]);
+          cur.updatedAt = new Date().toISOString();
+          return cur;
+        }, "Update savings balances"), null, "Saved. See you next week.");
+      };
+      f.append(go);
+    } else if (saveMode === "apy") {
+      f.appendChild(el("h2", null, "Change APY"));
+      f.appendChild(field("Savings APY %", "inA", "4.00", h.apy != null ? h.apy : null));
+      const go = el("button", "save", "Save APY"); go.id = "saveGo"; go.type = "button";
+      go.onclick = () => { const apy = numIn("inA"); if (apy == null || apy < 0 || apy > 20) { saveHint("Type a rate like 4.00.", "err"); return; } done(() => saveSavings((cur) => { cur.hysa.apy = apy; return cur; }, "Update savings APY"), null, "APY saved."); };
+      f.append(go);
+    } else if (saveMode === "interest") {
+      f.appendChild(el("h2", null, "Interest posted"));
+      f.appendChild(el("p", "note", "Enter the interest your bank paid for a month. It replaces the estimate."));
+      const now = new Date(); const l = el("label", "f"); l.append("Month"); const sel = el("select"); sel.id = "inM";
+      for (let m = now.getMonth(); m >= 0; m--) { const o = el("option", null, MONTHS[m]); o.value = now.getFullYear() + "-" + pad(m + 1); sel.appendChild(o); }
+      if (now.getDate() <= 7 && now.getMonth() > 0) sel.selectedIndex = 1;
+      l.appendChild(sel);
+      const r2 = el("div", "row2"); r2.append(l, field("Interest paid", "inI", "0.00")); f.appendChild(r2);
+      const go = el("button", "save", "Save interest"); go.id = "saveGo"; go.type = "button";
+      go.onclick = () => { const a = numIn("inI"), mk = $("inM").value; if (a == null || a < 0) { saveHint("Type the interest amount.", "err"); return; } done(() => saveSavings((cur) => { cur.hysa.interest = Object.assign({}, cur.hysa.interest || {}, { [mk]: a }); return cur; }, "Record savings interest"), null, "Interest saved."); };
+      f.append(go);
+    } else if (saveMode === "contrib") {
+      f.appendChild(el("h2", null, "Add Roth contribution"));
+      f.appendChild(field("Amount put in", "inC", "0.00"));
+      const go = el("button", "save", "Save contribution"); go.id = "saveGo"; go.type = "button";
+      go.onclick = () => { const a = numIn("inC"); if (!a || a <= 0) { saveHint("Type an amount above zero.", "err"); return; } done(() => saveSavings((cur) => { cur.roth.contributions = (cur.roth.contributions || []).concat([{ d: todayISO(), a }]); return cur; }, "Add Roth contribution"), null, "Contribution saved."); };
+      f.append(go);
+    }
+    const row = el("div", "btns"); const cancel = el("button", "ghost", "Cancel"); cancel.type = "button"; cancel.onclick = () => { saveMode = null; renderSave(); }; row.appendChild(cancel);
+    if (saveMode !== "setup" || savings) f.appendChild(row);
+    const hint = el("div", "hint"); hint.id = "saveHint"; hint.setAttribute("role", "status"); f.appendChild(hint);
+    const first = f.querySelector("input"); if (first) setTimeout(() => first.focus(), 30);
+  }
+  function lineChart(series) {
+    const pts = series.flatMap((s) => s.data.map((p) => p.d));
+    if (new Set(pts).size < 2) return null;
+    const dates = Array.from(new Set(pts)).sort(), t = (d) => new Date(d + "T12:00:00").getTime();
+    const x0 = t(dates[0]), x1 = t(dates[dates.length - 1]) || x0 + 1;
+    const vals = series.flatMap((s) => s.data.map((p) => p.v)); const hi = Math.max(1, ...vals), lo0 = Math.min(...vals); const lo = Math.max(0, lo0 - (hi - lo0) * 0.15 - hi * 0.02), max = hi;
+    const W = 320, H = 140, P = 8;
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.setAttribute("viewBox", "0 0 " + W + " " + H); svg.setAttribute("role", "img"); svg.setAttribute("aria-label", "Balances over time");
+    series.forEach((s) => {
+      if (s.data.length < 1) return;
+      const d = s.data.map((p, i) => (i ? "L" : "M") + (P + (t(p.d) - x0) / (x1 - x0 || 1) * (W - 2 * P)).toFixed(1) + " " + (H - P - (p.v - lo) / ((max - lo) || 1) * (H - 2 * P)).toFixed(1)).join(" ");
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path"); path.setAttribute("d", d); path.setAttribute("fill", "none"); path.style.stroke = s.color; path.setAttribute("stroke-width", "2.5"); path.setAttribute("stroke-linecap", "round"); path.setAttribute("stroke-linejoin", "round");
+      svg.appendChild(path);
+    });
+    return svg;
+  }
+  function renderSave() {
+    const st = $("saveStats"), cards = $("saveCards"), note = $("saveNote");
+    st.textContent = ""; cards.textContent = ""; note.textContent = "";
+    if (!savingsLoaded) { cards.appendChild(el("div", "empty", "Loading your savings…")); renderSaveForm(); return; }
+    const sv = savings;
+    if (!sv) {
+      if (!saveMode) saveMode = "setup";
+      renderSaveForm();
+      note.textContent = "Balances stay in your private repo and are never shown in notifications.";
+      return;
+    }
+    renderSaveForm();
+    const h = sv.hysa || {}, r = sv.roth || {};
+    const hb = lastOf(h.balances), rv = lastOf(r.values), rPrev = (r.values || []).length > 1 ? r.values[r.values.length - 2] : null;
+    const total = (hb ? hb.v : 0) + (rv ? rv.v : 0);
+    stat(st, "Total", money0(total)); stat(st, "Savings", hb ? money0(hb.v) : "None"); stat(st, "Roth IRA", rv ? money0(rv.v) : "None");
+
+    // update button
+    const upd = el("button", "save", "Update balances"); upd.type = "button"; upd.onclick = () => { saveMode = "update"; renderSave(); window.scrollTo(0, 0); };
+    if (!saveMode) cards.appendChild(upd);
+
+    // high yield savings
+    const est = hysaEstimate(sv);
+    const c1 = el("section", "card acct"); cards.appendChild(c1);
+    c1.append(el("div", "eyebrow", h.name || "High yield savings"), el("div", "bal", hb ? money(hb.v) : "$0.00"));
+    const s1 = el("div", "sub"); s1.append(el("span", null, hb ? "Updated " + fmtDay(hb.d) : "Not added yet")); const ap = el("span"); ap.append("APY ", el("b", null, (Number(h.apy) || 0).toFixed(2) + "%")); s1.appendChild(ap); c1.appendChild(s1);
+    const rowI = el("div", "row"); const li = el("span", null, MONTHS[new Date().getMonth()] + " interest"); if (est.estimated) li.appendChild(el("span", "est", "estimated")); rowI.append(li, el("span", "pos", money(est.month))); c1.appendChild(rowI);
+    const rowY = el("div", "row"); rowY.append(el("span", null, "Interest this year"), el("span", "pos", money(hysaYear(sv, est)))); c1.appendChild(rowY);
+    const b1 = el("div", "btns");
+    const bi = el("button", "ghost", "Interest posted"); bi.type = "button"; bi.onclick = () => { saveMode = "interest"; renderSave(); window.scrollTo(0, 0); };
+    const ba = el("button", "ghost", "Change APY"); ba.type = "button"; ba.onclick = () => { saveMode = "apy"; renderSave(); window.scrollTo(0, 0); };
+    b1.append(bi, ba); c1.appendChild(b1);
+
+    // roth
+    const c2 = el("section", "card acct"); cards.appendChild(c2);
+    c2.append(el("div", "eyebrow", r.name || "Vanguard Roth IRA"), el("div", "bal", rv ? money(rv.v) : "$0.00"));
+    const s2 = el("div", "sub"); s2.append(el("span", null, rv ? "Updated " + fmtDay(rv.d) : "Not added yet")); c2.appendChild(s2);
+    const rowC = el("div", "row");
+    if (rv && rPrev) {
+      const contribBetween = (r.contributions || []).filter((c) => !c.ytd && c.d > rPrev.d && c.d <= rv.d).reduce((a, c) => a + Number(c.a), 0);
+      const ch = rv.v - rPrev.v - contribBetween, pct = rPrev.v ? ch / rPrev.v * 100 : 0;
+      rowC.append(el("span", null, "Change since " + fmtDay(rPrev.d)), el("span", ch >= 0 ? "pos" : "neg", (ch >= 0 ? "+" : "−") + money(Math.abs(ch)) + " (" + (pct >= 0 ? "+" : "−") + Math.abs(pct).toFixed(1) + "%)"));
+    } else rowC.append(el("span", null, "Change since last update"), el("span", null, "After your next update"));
+    c2.appendChild(rowC);
+    const yr = new Date().getFullYear(), lim = IRA_LIMITS[yr], put = rothYear(sv);
+    const rowP = el("div", "row"); rowP.append(el("span", null, "Put in this year"), el("span", null, money0(put) + (lim ? " of " + money0(lim) : ""))); c2.appendChild(rowP);
+    if (lim) { const bar = el("div", "bar"); const i = el("i"); i.style.width = Math.min(100, put / lim * 100) + "%"; bar.appendChild(i); c2.appendChild(bar); }
+    const b2 = el("div", "btns"); const bc = el("button", "ghost", "Add contribution"); bc.type = "button"; bc.onclick = () => { saveMode = "contrib"; renderSave(); window.scrollTo(0, 0); }; b2.appendChild(bc); c2.appendChild(b2);
+
+    // history
+    const c3 = el("section", "card chart"); cards.appendChild(c3);
+    c3.appendChild(el("div", "head")).appendChild(el("h2", null, "Over time"));
+    const svg = lineChart([{ data: h.balances || [], color: "var(--gold)" }, { data: r.values || [], color: "var(--navy)" }]);
+    if (svg) { c3.appendChild(svg); const lg = el("div", "legend"); lg.innerHTML = '<span><i class="lg-h"></i>Savings</span><span><i class="lg-r"></i>Roth IRA</span>'; c3.appendChild(lg); }
+    else c3.appendChild(el("div", "empty", "Your chart starts after your second weekly update."));
+
+    note.textContent = "Interest is estimated daily from your balance and APY until you enter what was paid. Balances stay in your private repo and never appear in notifications.";
+  }
+
   // ---------- REPORTS view
   let reports = [], reportsLoaded = false, reportsLoading = false, openId = null, sheetOpen = false;
   function openSheet(id, focus) {
@@ -973,7 +1182,7 @@ body.locked { padding-bottom: 40px; }
 
   function renderAll() {
     renderChips();
-    if (view === "add") renderAdd(); else if (view === "budget") renderBudget(); else if (view === "spend") renderSpend(); else if (view === "income") renderIncome(); else renderTithe();
+    if (view === "add") renderAdd(); else if (view === "budget") renderBudget(); else if (view === "spend") renderSpend(); else if (view === "income") renderIncome(); else if (view === "save") renderSave(); else renderTithe();
     if (sheetOpen) renderReports();
     const at = (overview && overview.syncedAt) || (config && config.syncedAt);
     $("syncedAt").textContent = at ? "Workbook numbers as of " + new Date(at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
@@ -990,7 +1199,7 @@ body.locked { padding-bottom: 40px; }
       return;
     }
     if (sheetOpen) closeSheet();
-    show(["add", "budget", "spend", "income", "tithe"].includes(v) ? v : "add");
+    show(["add", "budget", "spend", "income", "tithe", "save"].includes(v) ? v : "add");
   }
   route();
   window.addEventListener("hashchange", route);
@@ -1016,7 +1225,7 @@ body.locked { padding-bottom: 40px; }
   };
   $("forget").onclick = () => {
     if ($("forget").dataset.sure !== "1") { $("forget").dataset.sure = "1"; $("forget").textContent = "Tap again to remove the key from this phone"; return; }
-    store.forget(); config = overview = null; pending = []; tithePaid = {}; reports = []; reportsLoaded = false; openId = null;
+    store.forget(); config = overview = null; pending = []; tithePaid = {}; reports = []; reportsLoaded = false; openId = null; savings = null; savingsLoaded = false; saveMode = null;
     $("forget").dataset.sure = ""; $("forget").textContent = "Disconnect this phone";
     lock(); renderAll();
   };
@@ -1027,7 +1236,8 @@ body.locked { padding-bottom: 40px; }
     if (!store.ready() || loading) return;
     loading = true;
     try {
-      const [c, o, t, e] = await Promise.all([store.readJSON("data/config.json"), store.readJSON("data/overview.json"), store.readJSON("data/tithing.json"), store.listEntries()]);
+      const [c, o, t, e, sv] = await Promise.all([store.readJSON("data/config.json"), store.readJSON("data/overview.json"), store.readJSON("data/tithing.json"), store.listEntries(), store.readJSON("data/savings.json")]);
+      if (!savingSaving) savings = sv; savingsLoaded = true;
       config = c; overview = o; pending = e;
       if (!titheSaving) tithePaid = (t && t.paid) || {};
       banner(""); renderAll();
