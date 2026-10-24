@@ -18,7 +18,12 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = new URL((event.notification.data && event.notification.data.url) || "./", self.registration.scope).href;
+  // only ever open pages inside Hess Finance, never another website
+  let url = self.registration.scope;
+  try {
+    const u = new URL((event.notification.data && event.notification.data.url) || "./", self.registration.scope).href;
+    if (u.startsWith(self.registration.scope)) url = u;
+  } catch (e) {}
   event.waitUntil((async () => {
     const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const w of wins) {
