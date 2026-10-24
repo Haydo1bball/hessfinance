@@ -876,11 +876,46 @@ body.locked { padding-bottom: 40px; }
     const y = String(new Date().getFullYear());
     return ((sv.roth || {}).contributions || []).filter((c) => c.d.startsWith(y)).reduce((a, c) => a + Number(c.a), 0);
   }
+  let prices = null;
+  function vtsax() { return (prices && prices.VTSAX) || null; }
+  function sharesAt(r, d) { let n = null; (r.shares || []).forEach((x) => { if (x.d <= d) n = x.n; }); return n; }
+  function priceAt(d) { const v = vtsax(); if (!v) return null; let p = null; (v.history || []).forEach((x) => { if (x.d <= d) p = x.p; }); return p; }
+  function rothNow(r) {
+    const v = vtsax(), sh = lastOf(r.shares);
+    if (sh && v) return { v: Math.round(sh.n * v.price * 100) / 100, d: v.d, auto: true, shares: sh.n, price: v.price };
+    const m = lastOf(r.values); return m ? { v: m.v, d: m.d, auto: false } : null;
+  }
+  function rothSeries(r) {
+    const v = vtsax(), first = (r.shares || [])[0];
+    if (!v || !first) return r.values || [];
+    const hist = v.history || []; let startIdx = hist.findIndex((x) => x.d >= first.d); if (startIdx < 0) startIdx = hist.length - 1; else if (startIdx > 0 && hist[startIdx].d > first.d) startIdx -= 1;
+    return hist.slice(Math.max(0, startIdx)).map((x) => ({ d: x.d, v: Math.round((sharesAt(r, x.d) ?? first.n) * x.p * 100) / 100 }));
+  }
+  function rothWeek(r) {
+    // market move on the shares you hold now over the last 7 days of VTSAX prices
+    const v = vtsax(), sh = lastOf(r.shares); if (!v || !sh || !(v.history || []).length) return null;
+    const hist = v.history, now = hist[hist.length - 1], cut = new Date(now.d + "T12:00:00"); cut.setDate(cut.getDate() - 7);
+    const cutISO = cut.getFullYear() + "-" + pad(cut.getMonth() + 1) + "-" + pad(cut.getDate());
+    let then = null; hist.forEach((x) => { if (x.d <= cutISO) then = x; }); if (!then) return null;
+    const ch = sh.n * (now.p - then.p); return { ch, pct: then.p ? (now.p - then.p) / then.p * 100 : 0, since: then.d };
+  }
+  function rothDividends(r) {
+    const y = String(new Date().getFullYear()), sh = r.shares || []; let total = 0, any = false;
+    for (let i = 1; i < sh.length; i++) {
+      if (!sh[i].d.startsWith(y)) continue;
+      const p = priceAt(sh[i].d); if (!p) continue; any = true;
+      const put = (r.contributions || []).filter((c) => !c.ytd && c.d === sh[i].d).reduce((a, c) => a + Number(c.a), 0);
+      const extra = (sh[i].n - sh[i - 1].n) * p - put;
+      if (extra > 0.5) total += extra;
+    }
+    return any ? Math.round(total * 100) / 100 : null;
+  }
+  function numIn3(id) { const v = parseFloat(String($(id).value || "").replace(/[,\s]/g, "")); return isNaN(v) ? null : Math.round(v * 1000) / 1000; }
   function numIn(id) { const v = parseFloat(String($(id).value || "").replace(/[$,\s%]/g, "")); return isNaN(v) ? null : Math.round(v * 100) / 100; }
   function saveHint(msg, cls) { const h = $("saveHint"); if (h) { h.textContent = msg || ""; h.className = "hint" + (cls ? " " + cls : ""); } }
   async function saveSavings(change, message) {
     savingSaving = true;
-    try { savings = await store.updateJSON("data/savings.json", (cur) => change(cur || { hysa: { name: "High yield savings", apy: 0, balances: [], interest: {} }, roth: { name: "Vanguard Roth IRA", values: [], contributions: [] } }), message); saveMode = null; }
+    try { savings = await store.updateJSON("data/savings.json", (cur) => change(cur || { hysa: { name: "High yield savings", apy: 0, balances: [], interest: {} }, roth: { name: "Vanguard Roth IRA", values: [], shares: [], contributions: [] } }), message); saveMode = null; }
     finally { savingSaving = false; }
   }
   function field(label, id, ph, val) { const l = el("label", "f"); l.append(label); const i = el("input"); i.id = id; i.inputMode = "decimal"; i.autocomplete = "off"; i.placeholder = ph; if (val != null) i.value = val; l.appendChild(i); return l; }
@@ -897,28 +932,43 @@ body.locked { padding-bottom: 40px; }
     };
     const mine = (m) => { const e = new Error(m); e.mine = true; return e; };
     if (saveMode === "setup" || saveMode === "update") {
-      f.appendChild(el("h2", null, saveMode === "setup" ? "Add your balances" : "Update balances"));
-      f.appendChild(el("p", "note", "Type what your bank and Vanguard apps show right now."));
-      const r2 = el("div", "row2"); r2.append(field("High yield savings", "inH", "0.00"), field("Vanguard Roth IRA", "inR", "0.00")); f.appendChild(r2);
-      const r3 = el("div", "row2");
-      r3.append(field(saveMode === "setup" ? "Savings APY %" : "Added to Roth since last time", saveMode === "setup" ? "inA" : "inC", saveMode === "setup" ? "4.00" : "Optional", saveMode === "setup" ? null : null));
-      if (saveMode === "setup") r3.append(field("Put in Roth so far this year", "inC", "Optional"));
-      f.appendChild(r3);
-      const go = el("button", "save", "Save balances"); go.id = "saveGo"; go.type = "button";
+      const setup = saveMode === "setup";
+      f.appendChild(el("h2", null, setup ? "Add your balances" : "Update savings balance"));
+      f.appendChild(el("p", "note", setup ? "Type what your bank and Vanguard apps show right now. Your Roth updates itself from the VTSAX price after this." : "Type what your bank app shows right now."));
+      const r2 = el("div", "row2"); r2.append(field("High yield savings", "inH", "0.00"), setup ? field("Savings APY %", "inA", "4.00") : el("span")); f.appendChild(r2);
+      if (setup) { const r3 = el("div", "row2"); r3.append(field("VTSAX shares", "inS", "0.000"), field("Put in Roth so far this year", "inC", "Optional")); f.appendChild(r3); }
+      const go = el("button", "save", setup ? "Save balances" : "Save balance"); go.id = "saveGo"; go.type = "button";
       go.onclick = () => {
-        const hv = numIn("inH"), rv = numIn("inR"), apy = saveMode === "setup" ? numIn("inA") : null, c = numIn("inC");
-        if (hv == null && rv == null) { saveHint("Type at least one balance.", "err"); return; }
-        if (saveMode === "setup" && apy == null) { saveHint("Add your savings APY, like 4.00.", "err"); return; }
+        const hv = numIn("inH"), apy = setup ? numIn("inA") : null, sh = setup ? numIn3("inS") : null, c = setup ? numIn("inC") : null;
+        if (hv == null && sh == null) { saveHint(setup ? "Type at least one balance." : "Type your savings balance.", "err"); return; }
+        if (setup && apy == null) { saveHint("Add your savings APY, like 4.00.", "err"); return; }
         const d = todayISO();
         done(() => saveSavings((cur) => {
-          const put = (arr, v) => { if (v == null) return arr || []; const list = (arr || []).filter((x) => x.d !== d); list.push({ d, v }); return list.sort((a, b) => a.d.localeCompare(b.d)); };
-          cur.hysa.balances = put(cur.hysa.balances, hv);
-          cur.roth.values = put(cur.roth.values, rv);
+          const put = (arr, v, key) => { if (v == null) return arr || []; const list = (arr || []).filter((x) => x.d !== d); const o = { d }; o[key] = v; list.push(o); return list.sort((a, b) => a.d.localeCompare(b.d)); };
+          cur.hysa.balances = put(cur.hysa.balances, hv, "v");
+          if (sh != null) cur.roth.shares = put(cur.roth.shares, sh, "n");
           if (apy != null) cur.hysa.apy = apy;
-          if (c) cur.roth.contributions = (cur.roth.contributions || []).concat([saveMode === "setup" ? { d, a: c, ytd: true } : { d, a: c }]);
+          if (c) cur.roth.contributions = (cur.roth.contributions || []).concat([{ d, a: c, ytd: true }]);
           cur.updatedAt = new Date().toISOString();
           return cur;
-        }, "Update savings balances"), null, "Saved. See you next week.");
+        }, "Update savings balances"), null, setup ? "Saved. Your Roth now follows the VTSAX price." : "Saved. See you next week.");
+      };
+      f.append(go);
+    } else if (saveMode === "shares") {
+      const r = (savings || {}).roth || {}, last = lastOf(r.shares);
+      f.appendChild(el("h2", null, "Update VTSAX shares"));
+      f.appendChild(el("p", "note", "Use the total share count Vanguard shows. If you bought shares, add what you put in so it isn't counted as dividends."));
+      const r2 = el("div", "row2"); r2.append(field("Total shares now", "inS", last ? String(last.n) : "0.000"), field("Money put in (if you bought)", "inC", "Optional")); f.appendChild(r2);
+      const go = el("button", "save", "Save shares"); go.id = "saveGo"; go.type = "button";
+      go.onclick = () => {
+        const sh = numIn3("inS"), c = numIn("inC");
+        if (sh == null || sh < 0) { saveHint("Type your total VTSAX shares.", "err"); return; }
+        const d = todayISO(), first = !(r.shares || []).length;
+        done(() => saveSavings((cur) => {
+          cur.roth.shares = (cur.roth.shares || []).filter((x) => x.d !== d).concat([{ d, n: sh }]).sort((a, b) => a.d.localeCompare(b.d));
+          if (c) cur.roth.contributions = (cur.roth.contributions || []).concat([{ d, a: c }]);
+          return cur;
+        }, "Update VTSAX shares"), null, first ? "Saved. Your Roth now follows the VTSAX price." : "Shares saved.");
       };
       f.append(go);
     } else if (saveMode === "apy") {
@@ -979,12 +1029,12 @@ body.locked { padding-bottom: 40px; }
     }
     renderSaveForm();
     const h = sv.hysa || {}, r = sv.roth || {};
-    const hb = lastOf(h.balances), rv = lastOf(r.values), rPrev = (r.values || []).length > 1 ? r.values[r.values.length - 2] : null;
+    const hb = lastOf(h.balances), rv = rothNow(r);
     const total = (hb ? hb.v : 0) + (rv ? rv.v : 0);
     stat(st, "Total", money0(total)); stat(st, "Savings", hb ? money0(hb.v) : "None"); stat(st, "Roth IRA", rv ? money0(rv.v) : "None");
 
     // update button
-    const upd = el("button", "save", "Update balances"); upd.type = "button"; upd.onclick = () => { saveMode = "update"; renderSave(); window.scrollTo(0, 0); };
+    const upd = el("button", "save", "Update savings balance"); upd.type = "button"; upd.onclick = () => { saveMode = "update"; renderSave(); window.scrollTo(0, 0); };
     if (!saveMode) cards.appendChild(upd);
 
     // high yield savings
@@ -1000,29 +1050,41 @@ body.locked { padding-bottom: 40px; }
     b1.append(bi, ba); c1.appendChild(b1);
 
     // roth
+    const rn = rothNow(r), v = vtsax();
     const c2 = el("section", "card acct"); cards.appendChild(c2);
-    c2.append(el("div", "eyebrow", r.name || "Vanguard Roth IRA"), el("div", "bal", rv ? money(rv.v) : "$0.00"));
-    const s2 = el("div", "sub"); s2.append(el("span", null, rv ? "Updated " + fmtDay(rv.d) : "Not added yet")); c2.appendChild(s2);
-    const rowC = el("div", "row");
-    if (rv && rPrev) {
-      const contribBetween = (r.contributions || []).filter((c) => !c.ytd && c.d > rPrev.d && c.d <= rv.d).reduce((a, c) => a + Number(c.a), 0);
-      const ch = rv.v - rPrev.v - contribBetween, pct = rPrev.v ? ch / rPrev.v * 100 : 0;
-      rowC.append(el("span", null, "Change since " + fmtDay(rPrev.d)), el("span", ch >= 0 ? "pos" : "neg", (ch >= 0 ? "+" : "−") + money(Math.abs(ch)) + " (" + (pct >= 0 ? "+" : "−") + Math.abs(pct).toFixed(1) + "%)"));
-    } else rowC.append(el("span", null, "Change since last update"), el("span", null, "After your next update"));
-    c2.appendChild(rowC);
+    c2.append(el("div", "eyebrow", r.name || "Vanguard Roth IRA"), el("div", "bal", rn ? money(rn.v) : "$0.00"));
+    const s2 = el("div", "sub");
+    if (rn && rn.auto) { s2.append(el("span", null, "VTSAX close " + fmtDay(rn.d))); const sp = el("span"); sp.append(el("b", null, rn.shares.toLocaleString("en-US", { maximumFractionDigits: 3 })), " shares at ", el("b", null, money(rn.price))); s2.appendChild(sp); }
+    else s2.append(el("span", null, rn ? "Updated " + fmtDay(rn.d) : "Not added yet"));
+    c2.appendChild(s2);
+    if (!(r.shares || []).length) {
+      c2.appendChild(el("p", "note", "Enter your VTSAX share count once and this card will update itself every weekday from the fund's price."));
+    } else if (!v) {
+      c2.appendChild(el("p", "note", "Waiting for the first VTSAX price. It's checked every weekday evening."));
+    }
+    const wk = rothWeek(r), rowW = el("div", "row");
+    if (wk) rowW.append(el("span", null, "Past week"), el("span", wk.ch >= 0 ? "pos" : "neg", (wk.ch >= 0 ? "+" : "−") + money(Math.abs(wk.ch)) + " (" + (wk.pct >= 0 ? "+" : "−") + Math.abs(wk.pct).toFixed(1) + "%)"));
+    else rowW.append(el("span", null, "Past week"), el("span", null, (r.shares || []).length ? "After a week of prices" : "After you add shares"));
+    c2.appendChild(rowW);
+    const dv = rothDividends(r), rowD = el("div", "row");
+    rowD.append(el("span", null, "Dividends reinvested this year"), el("span", dv ? "pos" : null, dv == null ? "After your next share update" : money(dv)));
+    c2.appendChild(rowD);
     const yr = new Date().getFullYear(), lim = IRA_LIMITS[yr], put = rothYear(sv);
     const rowP = el("div", "row"); rowP.append(el("span", null, "Put in this year"), el("span", null, money0(put) + (lim ? " of " + money0(lim) : ""))); c2.appendChild(rowP);
     if (lim) { const bar = el("div", "bar"); const i = el("i"); i.style.width = Math.min(100, put / lim * 100) + "%"; bar.appendChild(i); c2.appendChild(bar); }
-    const b2 = el("div", "btns"); const bc = el("button", "ghost", "Add contribution"); bc.type = "button"; bc.onclick = () => { saveMode = "contrib"; renderSave(); window.scrollTo(0, 0); }; b2.appendChild(bc); c2.appendChild(b2);
+    const b2 = el("div", "btns");
+    const bs = el("button", (r.shares || []).length ? "ghost" : "save", (r.shares || []).length ? "Update shares" : "Enter VTSAX shares"); bs.type = "button"; bs.onclick = () => { saveMode = "shares"; renderSave(); window.scrollTo(0, 0); };
+    const bc = el("button", "ghost", "Add contribution"); bc.type = "button"; bc.onclick = () => { saveMode = "contrib"; renderSave(); window.scrollTo(0, 0); };
+    b2.append(bs, bc); c2.appendChild(b2);
 
     // history
     const c3 = el("section", "card chart"); cards.appendChild(c3);
     c3.appendChild(el("div", "head")).appendChild(el("h2", null, "Over time"));
-    const svg = lineChart([{ data: h.balances || [], color: "var(--gold)" }, { data: r.values || [], color: "var(--navy)" }]);
+    const svg = lineChart([{ data: h.balances || [], color: "var(--gold)" }, { data: rothSeries(r), color: "var(--navy)" }]);
     if (svg) { c3.appendChild(svg); const lg = el("div", "legend"); lg.innerHTML = '<span><i class="lg-h"></i>Savings</span><span><i class="lg-r"></i>Roth IRA</span>'; c3.appendChild(lg); }
-    else c3.appendChild(el("div", "empty", "Your chart starts after your second weekly update."));
+    else c3.appendChild(el("div", "empty", "Your chart fills in as prices and balances come in."));
 
-    note.textContent = "Interest is estimated daily from your balance and APY until you enter what was paid. Balances stay in your private repo and never appear in notifications.";
+    note.textContent = "Savings interest is estimated daily from your balance and APY until you enter what was paid. Your Roth value is your VTSAX shares times the latest closing price from Nasdaq. Balances stay in your private repo and never appear in notifications.";
   }
 
   // ---------- REPORTS view
@@ -1236,8 +1298,8 @@ body.locked { padding-bottom: 40px; }
     if (!store.ready() || loading) return;
     loading = true;
     try {
-      const [c, o, t, e, sv] = await Promise.all([store.readJSON("data/config.json"), store.readJSON("data/overview.json"), store.readJSON("data/tithing.json"), store.listEntries(), store.readJSON("data/savings.json")]);
-      if (!savingSaving) savings = sv; savingsLoaded = true;
+      const [c, o, t, e, sv, px] = await Promise.all([store.readJSON("data/config.json"), store.readJSON("data/overview.json"), store.readJSON("data/tithing.json"), store.listEntries(), store.readJSON("data/savings.json"), store.readJSON("data/prices.json").catch(() => null)]);
+      if (!savingSaving) savings = sv; savingsLoaded = true; if (px) prices = px;
       config = c; overview = o; pending = e;
       if (!titheSaving) tithePaid = (t && t.paid) || {};
       banner(""); renderAll();
