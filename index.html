@@ -957,8 +957,8 @@ body.locked { padding-bottom: 40px; }
     } else if (saveMode === "shares") {
       const r = (savings || {}).roth || {}, last = lastOf(r.shares);
       f.appendChild(el("h2", null, "Update VTSAX shares"));
-      f.appendChild(el("p", "note", "Use the total share count Vanguard shows. If you bought shares, add what you put in so it isn't counted as dividends."));
-      const r2 = el("div", "row2"); r2.append(field("Total shares now", "inS", last ? String(last.n) : "0.000"), field("Money put in (if you bought)", "inC", "Optional")); f.appendChild(r2);
+      f.appendChild(el("p", "note", "Use the total share count Vanguard shows. Only fill in the second box if you just bought shares, with the new money from that purchase, so it isn't counted as dividends. Leave it blank after a dividend."));
+      const r2 = el("div", "row2"); r2.append(field("Total shares now", "inS", last ? String(last.n) : "0.000"), field("New money this purchase", "inC", "Leave blank if none")); f.appendChild(r2);
       const go = el("button", "save", "Save shares"); go.id = "saveGo"; go.type = "button";
       go.onclick = () => {
         const sh = numIn3("inS"), c = numIn("inC");
