@@ -117,6 +117,8 @@ h2 { font-family: var(--f-display); font-weight: 600; font-size: 1.1rem; margin:
 label.f { display: flex; flex-direction: column; gap: 5px; font-size: 0.8rem; color: var(--muted); font-weight: 600; min-width: 0; }
 label.f input { font: 400 1rem var(--f-body); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; width: 100%; min-width: 0; }
 label.f input:focus { outline: 2px solid var(--navy); outline-offset: 1px; }
+label.f select { font: 400 1rem var(--f-body); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; width: 100%; min-width: 0; }
+label.f select:focus { outline: 2px solid var(--navy); outline-offset: 1px; }
 .save { border: 0; background: var(--navy); color: var(--navy-ink); font: 700 1.05rem var(--f-body); padding: 15px; border-radius: 14px; cursor: pointer; width: 100%; box-shadow: inset 0 -3px 0 var(--gold); transition: background .3s, transform .15s var(--ease), box-shadow .3s; }
 .save.done { background: var(--good); box-shadow: inset 0 -3px 0 rgba(0,0,0,.15); }
 .save .tick { display: inline-block; margin-right: 6px; animation: tick .45s var(--ease); }
@@ -352,6 +354,7 @@ body.locked { padding-bottom: 40px; }
         <label class="f" id="noteWrapShort">Notes<input id="noteA" placeholder="Optional"></label>
       </div>
       <label class="f" id="noteWrapLong" hidden>Notes<input id="noteB" placeholder="Optional"></label>
+      <label class="f" id="forWrap" hidden>For month<select id="forMonth"></select></label>
       <button class="save" id="save">Save entry</button>
       <div class="hint" id="hint" role="status" aria-live="polite"></div>
     </section>
@@ -578,8 +581,8 @@ body.locked { padding-bottom: 40px; }
   // ---------- data helpers: workbook rows plus entries not yet synced
   function year() { return (overview && overview.year) || new Date().getFullYear(); }
   function allExpenses() {
-    const base = overview ? overview.expenses.map((x) => ({ d: x.d, c: x.c, a: x.a, n: x.n })) : [];
-    pending.filter((p) => p.kind === "Expense").forEach((p) => base.push({ d: p.date, c: p.category, a: p.amount, n: p.notes || "", pending: true }));
+    const base = overview ? overview.expenses.map((x) => ({ d: x.d, c: x.c, a: x.a, n: x.n, fm: x.fm })) : [];
+    pending.filter((p) => p.kind === "Expense").forEach((p) => base.push({ d: p.date, c: p.category, a: p.amount, n: p.notes || "", fm: p.forMonth, pending: true }));
     return base.filter((x) => x.d.startsWith(String(year())));
   }
   function allIncome() {
@@ -633,15 +636,32 @@ body.locked { padding-bottom: 40px; }
     $("tExp").setAttribute("aria-pressed", k === "Expense"); $("tInc").setAttribute("aria-pressed", k === "Income");
     $("tExp").parentElement.classList.toggle("inc", k === "Income");
     $("descWrap").hidden = k !== "Income"; $("noteWrapShort").hidden = k === "Income"; $("noteWrapLong").hidden = k !== "Income";
-    renderChips(); renderCatLeft();
+    renderChips(); renderCatLeft(); renderForMonth();
   }
   $("tExp").onclick = () => setKind("Expense"); $("tInc").onclick = () => setKind("Income");
   function renderChips() {
     const box = $("chips"); box.textContent = "";
     const cats = categories();
     if (!cats.length) { box.appendChild(el("div", "empty", "Loading categories")); return; }
-    cats.forEach((c) => { const b = el("button", null, c); b.type = "button"; b.setAttribute("aria-pressed", c === category); b.onclick = () => { category = c; renderChips(); renderCatLeft(); }; box.appendChild(b); });
+    cats.forEach((c) => { const b = el("button", null, c); b.type = "button"; b.setAttribute("aria-pressed", c === category); b.onclick = () => { category = c; renderChips(); renderCatLeft(); renderForMonth(); }; box.appendChild(b); });
   }
+  // Tithing only: which month the payment covers. Starts on last month, since tithing is paid after the month ends.
+  function renderForMonth() {
+    const wrap = $("forWrap"), sel = $("forMonth");
+    const show = kind === "Expense" && category === "Tithing";
+    if (show && wrap.hidden) {
+      sel.textContent = "";
+      const now = new Date();
+      for (let i = 0; i < 12; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const o = el("option", null, MONTHS[d.getMonth()] + " " + d.getFullYear());
+        o.value = d.getFullYear() + "-" + pad(d.getMonth() + 1); sel.appendChild(o);
+      }
+      sel.selectedIndex = 1;
+    }
+    wrap.hidden = !show;
+  }
+  function fmtForMonth(key) { const [y, m] = String(key).split("-"); return MONTHS[Number(m) - 1].slice(0, 3) + " " + y; }
   function thisMonthSpent() { const m = new Date().getMonth(); return sumBy(allExpenses().filter(inMonth(m))); }
   function renderCatLeft() {
     const e = $("catLeft"); const b = budgets()[category];
@@ -671,7 +691,7 @@ body.locked { padding-bottom: 40px; }
     if (!pending.length) { box.appendChild(el("div", "empty", "Nothing waiting. New entries show up here until they're added to your workbook.")); return; }
     pending.forEach((p) => {
       const r = el("div", "item" + (seen && !seen.has(p.id) ? " pop" : "")); const t = el("div", "t");
-      t.append(el("b", null, p.category), el("small", null, fmtDay(p.date) + (p.notes ? " · " + p.notes : "") + (p.kind === "Income" && p.description ? " · " + p.description : "")));
+      t.append(el("b", null, p.category), el("small", null, fmtDay(p.date) + (p.forMonth ? " · for " + fmtForMonth(p.forMonth) : "") + (p.notes ? " · " + p.notes : "") + (p.kind === "Income" && p.description ? " · " + p.description : "")));
       const a = el("span", "num" + (p.kind === "Income" ? " inc" : ""), (p.kind === "Income" ? "+" : "") + money(p.amount));
       const del = el("button", "del" + (confirmId === p.id ? " confirm" : ""), confirmId === p.id ? "Delete?" : "Remove"); del.type = "button";
       del.onclick = async () => {
@@ -693,15 +713,16 @@ body.locked { padding-bottom: 40px; }
     const date = $("date").value || today();
     const note = (kind === "Income" ? $("noteB") : $("noteA")).value.trim();
     const entry = { kind, amount, category, date, notes: note, description: kind === "Income" ? ($("desc").value.trim() || "Paycheck") : "", createdAt: new Date().toISOString() };
+    if (kind === "Expense" && category === "Tithing" && $("forMonth").value) entry.forMonth = $("forMonth").value;
     $("save").disabled = true;
     try {
       const saved = await store.addEntry(entry);
       pending = [saved].concat(pending); renderAll();
-      hint("Saved " + category + " " + money(amount) + ". It goes into Excel at the next sync.", "ok");
+      hint("Saved " + category + " " + money(amount) + (entry.forMonth ? " for " + fmtForMonth(entry.forMonth) : "") + ". It goes into Excel at the next sync.", "ok");
       const sb = $("save"); sb.classList.add("done"); sb.innerHTML = '<span class="tick">✓</span>Saved';
       setTimeout(() => { sb.classList.remove("done"); sb.textContent = "Save entry"; }, 1400);
       $("amt").value = ""; $("noteA").value = ""; $("noteB").value = ""; $("desc").value = "";
-      category = ""; renderChips(); renderCatLeft();
+      category = ""; renderChips(); renderCatLeft(); renderForMonth();
     } catch (e) {
       hint(e && e.auth ? e.message : "Couldn't save. Check your connection and try again.", "err");
     } finally { $("save").disabled = false; }
@@ -830,7 +851,7 @@ body.locked { padding-bottom: 40px; }
       const key = y + "-" + pad(k + 1);
       const ti = total(inc.filter(inMonth(k)).filter((x) => !skip.has(x.c)));
       const owed = Math.round(ti * 10) / 100;
-      const logged = total(exp.filter(inMonth(k)).filter((x) => x.c === "Tithing"));
+      const logged = total(exp.filter((x) => x.c === "Tithing" && (x.fm ? x.fm === key : inMonth(k)(x))));
       const isPaid = !!tithePaid[key];
       tI += ti; tO += owed; if (isPaid) { tPaid += owed; nPaid++; }
       const tr = el("tr", isPaid ? "paidrow" : null);
