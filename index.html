@@ -1250,6 +1250,14 @@ body.locked { padding-bottom: 40px; }
     if (!id) { id = "phone-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); try { localStorage.setItem(DEVICE_KEY, id); } catch (e) {} }
     return id;
   }
+  // true if this phone's sign up was made with the current key
+  function sameKey(sub) {
+    try {
+      const k = sub && sub.options && sub.options.applicationServerKey; if (!k) return false;
+      const a = new Uint8Array(k), b = b64ToBytes(VAPID_PUBLIC); if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true;
+    } catch (e) { return false; }
+  }
   function b64ToBytes(s) { const p = "=".repeat((4 - s.length % 4) % 4); const raw = atob((s + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(raw, (c) => c.charCodeAt(0)); }
   function renderNotif() {
     const btn = $("notifBtn"), pill = $("notifPill"), note = $("notifNote");
@@ -1285,7 +1293,9 @@ body.locked { padding-bottom: 40px; }
         if (perm !== "granted") { notifHint(perm === "denied" ? "Notifications were blocked. You can allow them in iPhone Settings." : "No problem, you can turn them on anytime."); return; }
         swReg = swReg || await navigator.serviceWorker.register("sw.js");
         await navigator.serviceWorker.ready;
-        const sub = (await swReg.pushManager.getSubscription()) || await swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID_PUBLIC) });
+        let sub = await swReg.pushManager.getSubscription();
+        if (sub && !sameKey(sub)) { try { await sub.unsubscribe(); } catch (e) {} sub = null; }  // key changed, sign up again
+        if (!sub) sub = await swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID_PUBLIC) });
         const j = sub.toJSON();
         await store.writeJSON("data/push/" + deviceId() + ".json", { endpoint: j.endpoint, keys: j.keys, createdAt: new Date().toISOString() }, "Turn on notifications for a phone");
         pushOn = true; notifHint("You're all set. Your first report comes Sunday at 6pm.", "ok");
@@ -1299,7 +1309,7 @@ body.locked { padding-bottom: 40px; }
     try {
       swReg = await navigator.serviceWorker.register("sw.js");
       const sub = await swReg.pushManager.getSubscription();
-      pushOn = !!sub && Notification.permission === "granted";
+      pushOn = !!sub && sameKey(sub) && Notification.permission === "granted";
     } catch (e) {}
     if (sheetOpen) renderNotif();
   })();
