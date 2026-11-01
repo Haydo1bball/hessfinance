@@ -1147,7 +1147,11 @@ body.locked { padding-bottom: 40px; }
 
   // ---------- REPORTS view
   let reports = [], reportsLoaded = false, reportsLoading = false, openId = null, sheetOpen = false;
+  // report names must look like week-YYYY-MM-DD or year-YYYY, so a crafted link can't load any other file
+  const REPORT_ID = /^(week-\d{4}-\d{2}-\d{2}|year-\d{4})$/;
+  const safeReportId = (id) => (typeof id === "string" && REPORT_ID.test(id) ? id : null);
   function openSheet(id, focus) {
+    id = safeReportId(id);
     if (!store.ready()) return;
     if (id) openId = id;
     sheetOpen = true; $("v-reports").hidden = false; document.body.classList.add("sheet-open");
@@ -1178,7 +1182,7 @@ body.locked { padding-bottom: 40px; }
     } catch (e) { /* keep what we have */ }
     finally { reportsLoading = false; if (sheetOpen) renderReports(); }
   }
-  function openReport(id) { openId = id; renderReports(); const o = $("reportOpen"); if (!o.hidden) o.scrollIntoView({ block: "start", behavior: "smooth" }); }
+  function openReport(id) { openId = safeReportId(id); renderReports(); const o = $("reportOpen"); if (!o.hidden) o.scrollIntoView({ block: "start", behavior: "smooth" }); }
   function renderReportDetail(r) {
     const box = $("reportOpen"); box.textContent = "";
     if (!r) { box.hidden = true; return; }
@@ -1230,6 +1234,7 @@ body.locked { padding-bottom: 40px; }
       list.appendChild(b);
     });
     const open = reports.find((r) => r.id === openId);
+    if (openId && !safeReportId(openId)) openId = null;
     if (openId && !open && reportsLoaded) { const p = "data/reports/" + openId + ".json"; store.readJSON(p).then((r) => { if (r) { reports = [r].concat(reports.filter((x) => x.id !== r.id)); renderReports(); } }).catch(() => {}); }
     renderReportDetail(open || null);
   }
@@ -1311,7 +1316,7 @@ body.locked { padding-bottom: 40px; }
   // #add, #budget, ... and #reports/<id> (from a notification tap)
   function route() {
     const h = (location.hash || "").replace("#", "");
-    const [v, id] = h.split("/");
+    const [v, rawId] = h.split("/"); const id = safeReportId(rawId);
     if (v === "reports") {
       show(view);  // keep the current tab underneath
       openSheet(id || null, id ? null : "past");
